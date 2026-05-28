@@ -1,0 +1,287 @@
+# =====================================================  
+# FACE2021 kísérleti adatok importálása, tisztítása, elemzése  
+# Fájl: FACE2021_R.xlsx → FACE2021_R (R data frame)  
+# Szerző: Pabar Sándor Attila  
+# Dátum: 2026.04.29  
+# =====================================================
+
+# 1. KÖNYVTÁRAK betöltése  
+# Mindig elfeljti install-alni is ezeket a library-kat. Valamiért nem is akar automatikusan lefutni ha egybe nyomok rá. Verzió gond?  
+# install.packages("readxl")      # Excel fájlok beolvasásához (xlsx, xls)  
+# install.packages("dplyr")       # Adatkezelés (mutate, filter, select, stb.)  
+# install.packages("janitor")     # Oszlopnevek tisztítása, ellenőrzés  
+# install.packages("readr")       # Egységes dátum/numerikus formátumkezelés
+
+library(readxl)      # Excel fájlok beolvasásához (xlsx, xls)  
+library(dplyr)       # Adatkezelés (mutate, filter, select, stb.)  
+library(janitor)     # Oszlopnevek tisztítása, ellenőrzés  
+library(readr)       # Egységes dátum/numerikus formátumkezelés
+
+  
+# 2. MUNKAKÖNYVTÁR beállítása  
+setwd("C:/Users/user/Desktop")  
+getwd()              # Ellenőrizd, hogy jó helyen vagy-e
+
+# 3. Fájl kiválasztása  
+df <- read_excel("FACE 2019.xlsx")
+
+# # Ez talán már túl bonyolított fájl beolvasás. Ez akkor jó ha át is akarom nevezni a fájlt az R-ben.   
+# df <- read_excel(  
+#     
+#   "2021 FACE.xlsx",  
+#     
+#   skip = 3, # az első 3 sort kihagyja  
+#     
+#   col_names = TRUE # az első beolvasott sort (tehát az eredeti 4.-et) oszlopnévként használja  
+#     
+# )  
+# skip=0: minden sort beolvass (az 1. sor lesz az 1. sor)  
+# col_names=FALSE: ne használja az 1. sort fejlécnek, manuálisan adjuk meg  
+# col_names = TRUE: De mivel én helyesen már előre megadtam, így azokat használja.  
+## col_names: base package. Alapból be van építve
+
+  
+# 4. Adat szűkítés, ha csak bizonyos sorok kellenek.  
+df <- df[c(3:26),]
+
+# 5. ADATTÍPUSOK optimalizálása (faktorok, numerikusok) # Ezzel van amelyik kódot átnvezzük: N ->Nemere  
+df <- df %>%  
+  mutate(  
+    # Kategória változók faktorrá alakítása (ANOVA-hoz)  
+    co2_level = factor(co2_level, levels = c("FACE", "Kontrol")),  
+    n_level = factor(n_level, levels = c("High", "Low")),  
+    cultivar = factor(cultivar, levels = c("Nemere", "Dandár")),   
+      
+    # Minden többi numerikusra (hullámhosszak, kémiai paraméterek)  
+    across(c("Gyökér biomassza":"Hossz/Tömeg"), as.numeric),  
+      
+    # sample_i megtartása karakterként (mintaazonosító)  
+    sample_i = as.character("2019")  
+  )  
+# ellenőrzés  
+str(df)  
+# -----------------------  
+# 6. PCA- adatelőkészítés
+
+# Kívánt oszlopok nevei # Ha elakarom távolítani a character oszlopokat, vagy az összes, nem numerikus oszlopot mondjuk PCA-ra.   
+# a prcomp/rda-hoz csak numeric lehet, ezért csinálok egy új df-t erre.   
+# 4 megoldás  
+# 1. # Kiválasztod minden oszlopot, kivéve a két karakterest (vagy azt ami nem kell)  
+# pca <- df[c(1:24), !names(df) %in% c("id", "sample_i")]  
+# 2. Csak a chr oszlopok kizárása  
+# FACE2021_R <- FACE2021_R[c(1:24), sapply(FACE2021_R, function(x) !is.character(x))]  
+# 3. csak az első 24 sor, és csak numerikus és factor oszlopok  
+# FACE2021_R <- FACE2021_R[c(1:24), sapply(FACE2021_R, function(x) is.numeric(x) | is.factor(x))]  
+# 4. Ha manuálisan csak beírom amiket akarok.   
+# # desired_columns <- c("Normalized.Yield", "Q", "K", "E4E6", "POXC", "atlag.Abs.NaF", "atlag.Abs.NaOH", "DOC.mgkg", "N", "TOC", "CN")  
+# Honnan választom ki? Valszeg nem jó ez a kód.
+
+# Kívánt oszlopok nevei  
+#az összes, nem numerikus oszlop eltávolítása PCA-ra.  
+# 3. csak az első 24 sor, és csak numerikus és factor oszlopok  
+pca_df <- df[c(1:24), sapply(df, function(x) is.numeric(x))]
+
+# 7. PCA - futtatás  
+#Libraries   
+# install.packages("vegan")  
+# install.packages("ggfortify")  
+# install.packages("factoextra")
+
+# I. [https://www.youtube.com/watch?v=mNpBrHwOCt4&list=WL&t=351](https://www.youtube.com/watch?v=mNpBrHwOCt4&list=WL&t=351 "https://www.youtube.com/watch?v=mNpBrHwOCt4&list=WL&t=351")  
+library(MASS)   
+library(factoextra)  
+library(ggplot2)
+
+# Ha nincs hiányzó adat  
+# pca<-prcomp(pca_df, scale = TRUE)
+
+# Ha van hiányzó adat, akkor az oszlop mediánjával pótolni azokat.  
+pca_df_clean <- pca_df %>%  
+  mutate(across(everything(), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+pca <- prcomp(pca_df_clean, scale = TRUE)
+
+  
+summary(pca)  
+names(pca)  
+# Eigenértékek lekérése  
+eigenvalues <- pca$sdev^2  
+eigenvalues
+
+# Ezek mire is valók? Néhány infót kapok a PCA eredményekről?  
+pca$sdev  
+pca$rotation #Eigenvectors   
+pca$center  
+pca$scale # 1-2 változó nagyon kilóg. ezeket lehet át kéne alakítani  
+pca$x
+
+# Scree Plot of Variance   
+fviz_eig(pca, addlabels = TRUE, ylim = c(0, 50))  
+# Biplot with Default Settings  
+fviz_pca_biplot(pca) # A pontok feliratozva vannak
+
+#Biplot with Labeled Variables # felirat nélkül  
+fviz_pca_biplot(pca,   
+                label="var")     
+
+# Feketében, színnel elválasztott faktor  
+fviz_pca_biplot(pca,  
+                label = "var",  
+                habillage = df$co2_level,   
+                col.var = "black")
+
+# co2_level  
+fviz_pca_biplot(pca,  
+                label="var",  
+                habillage = df$co2_level,   
+                col.var = "black") +  
+  scale_color_manual(values=c("orange", "purple"))  
+# n_level  
+fviz_pca_biplot(pca,  
+                label="var",  
+                habillage = df$n_level,   
+                col.var = "black") +  
+  scale_color_manual(values=c("orange", "green"))  
+#cultivar  
+fviz_pca_biplot(pca,  
+                label="var",  
+                habillage = df$cultivar,   
+                col.var = "black") +  
+  scale_color_manual(values=c("red", "blue"))  
+# #plot - Csak érdekel, így kiszűrni azt ha nagyon eltérőek a plotok.  
+# fviz_pca_biplot(pca,  
+#                 label="var",  
+#                 habillage = df$plot_id,   
+#                 col.var = "black") +  
+#   scale_color_manual(values=c("red", "blue", "green"))
+
+# II. Bekarikázós PCA-hoz  
+# [https://www.youtube.com/watch?v=QJARK5WQabA](https://www.youtube.com/watch?v=QJARK5WQabA "https://www.youtube.com/watch?v=QJARK5WQabA")  
+# [https://www.youtube.com/watch?v=PQf9csxkDYQ](https://www.youtube.com/watch?v=PQf9csxkDYQ "https://www.youtube.com/watch?v=PQf9csxkDYQ")
+
+# LOAD LIBRARIES  
+library(readxl) # Excel beolvasáshoz kéne?  
+library(vegan)  
+library(ggplot2)  
+library(factoextra)  
+library(ggfortify)  
+library(ggrepel)
+
+  
+# pca <- rda(decostand(pca_df, method = "hellinger"), scale = TRUE, center = TRUE) # Így más lett a pca, mint a fentebbi verzió
+
+# PRCOMP package  
+# Hellinger transformation  
+pca.prcomp.h <- decostand(pca_df, "hellinger")  
+pca.prcomp <- prcomp(pca.prcomp.h, scale. = TRUE, center = TRUE)  
+pca.prcomp
+
+# Eigenértékek lekérése  
+eig.val <- get_eigenvalue(pca.prcomp)  
+eig.val
+
+# Result for variables  
+var <- get_pca_var(pca.prcomp)  
+var
+
+# Quality ellenőrzések. ... A videóban bővebben  
+pca.prcomp.extract.varcoord <- var$coord 
+
+# Results for individuals (plot)  
+ind <- get_pca_ind(pca.prcomp)  
+ind
+
+pca.prcomp.extract.indcoord <- ind$coord 
+
+# BEKARIKAZOS MEGOLDAS  
+pca.plot <- ggplot(df, aes(x=plotx, y=ploty, color=co2_level)) +  
+  geom_point()+  
+  ggtitle("FACE PCA")+  
+  xlab("PC1")+ylab("PC2")+  
+  coord_fixed(ratio = 1)+  
+  theme_bw() + theme(aspect.ratio = 1) + theme(panel.grid = element_blank()) +   
+  stat_ellipse(geom = "polygon", aes(fill = after_scale(alpha(colour, 0.3))),  
+               data = df[df$co2_level != "vesicolor",])
+
+pca.plot
+
+# Scree Plot ###  
+screeplot(pca.prcomp, bstick = TRUE, type = 'l', main = NULL)
+
+# Manuális, szép verzió a videóban.3:22/8:30
+
+# könnyebb. factroextra package.  
+fviz_eig(pca.prcomp)
+
+# Plot verziók  
+# basic  
+biplot(pca.prcomp, scaling = "symmetric")  
+# A fenti módosítása # fuuu. ez nagyon fura ábra lett nekem.   
+fviz_pca_biplot(pca.prcomp, repel = TRUE,  
+                cor.var = "#2e9fdf", # Variables color  
+                col.ind = "#696969") # Individuals color
+
+# kiválaszthatom, hogy mely dimenziókat akarok vizualizálni.   
+# Most az 1. és 3. PC-t választottam ki.  
+plot(pca.prcomp$x[,1], pca.prcomp$x[,3])
+
+# Most jön a bekarikázós plot. Kell a ffplot 2 ésvagy a ggfortify package  
+pca.prcomp.df <- data.frame(pca.prcomp$x) # A PC-ket léthozza, mint oszlopok, a mintákat pedig sorokba rendezi  
+pca.prcomp.df$plotx <- pca.prcomp.df[,1] # A PC1-t létrehozza, mint plotx oszlop (x tengely)  
+pca.prcomp.df$ploty <- pca.prcomp.df[,2] # A PC2-t létrehozza, mint plotx oszlop (y tengely)
+
+# Attól függően, hogy a mért paraméterek között vagy épp a minták akarok hasonlóságokat kimutatni tranzponálni kell az adatok. 
+
+# CO2  
+co2_level = as.character(df$co2_level) # Hozzáad egy kategórikus oszlopot  
+pca.prcomp.df$co2_level <- co2_level   # Hozzáad egy kategórikus oszlopot
+
+pca.prcomp.plot <- ggplot(pca.prcomp.df, aes(x=plotx, y=ploty, color=co2_level)) +  
+  geom_point() +   
+  ggtitle("PCA with CO2 level") +   
+  xlab("PC1") + ylab("PC2") +  
+  coord_fixed(ratio = 1) +   
+  theme_bw() + theme(aspect.ratio=1) + theme(panel.grid = element_blank()) +  
+  stat_ellipse(geom = "polygon", aes(fill = after_scale(alpha(colour, 0.3))),  
+               data = pca.prcomp.df[pca.prcomp.df$co2_level != "versicolor",])  
+pca.prcomp.plot
+
+# CO2 színes kitöltés nélkül  
+pca.prcomp.plot <- ggplot(pca.prcomp.df, aes(x=plotx, y=ploty, color=co2_level)) +  
+  geom_point() +   
+  ggtitle(expression("PCA with CO"[2] * " level")) +   
+  xlab("PC1") + ylab("PC2") +  
+  coord_fixed(ratio = 1) +   
+  theme_bw() + theme(aspect.ratio=1) + theme(panel.grid = element_blank()) +  
+  stat_ellipse()  
+pca.prcomp.plot
+
+# ----  
+# N dózis  
+n_level = as.character(df$n_level) # Hozzáad egy kategórikus oszlopot  
+pca.prcomp.df$n_level <- n_level   # Hozzáad egy kategórikus oszlopot
+
+pca.prcomp.plot <- ggplot(pca.prcomp.df, aes(x=plotx, y=ploty, color=n_level)) +  
+  geom_point() +   
+  ggtitle("PCA with N level") +   
+  xlab("PC1") + ylab("PC2") +  
+  coord_fixed(ratio = 1) +   
+  theme_bw() + theme(aspect.ratio=1) + theme(panel.grid = element_blank()) +  
+  stat_ellipse(geom = "polygon", aes(fill = after_scale(alpha(colour, 0.3))),  
+               data = pca.prcomp.df[pca.prcomp.df$co2_level != "versicolor",])  
+pca.prcomp.plot
+
+# ----  
+# Fajta  
+cultivar = as.character(df$cultivar) # Hozzáad egy kategórikus oszlopot  
+pca.prcomp.df$cultivar <- cultivar   # Hozzáad egy kategórikus oszlopot
+
+pca.prcomp.plot <- ggplot(pca.prcomp.df, aes(x=plotx, y=ploty, color=cultivar)) +  
+  geom_point() +   
+  ggtitle("PCA with Cultivar") +   
+  xlab("PC1") + ylab("PC2") +  
+  coord_fixed(ratio = 1) +   
+  theme_bw() + theme(aspect.ratio=1) + theme(panel.grid = element_blank()) +  
+  stat_ellipse(geom = "polygon", aes(fill = after_scale(alpha(colour, 0.3))),  
+               data = pca.prcomp.df[pca.prcomp.df$co2_level != "versicolor",])  
+pca.prcomp.plot
